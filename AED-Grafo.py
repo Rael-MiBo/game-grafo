@@ -32,7 +32,7 @@ DIFICULDADES = {
     "Fácil":  {"camadas": 3, "ciclos": 0.1, "min_nos": 2, "max_nos": 3},
     "Normal": {"camadas": 4, "ciclos": 0.3, "min_nos": 2, "max_nos": 4},
     "Pro":    {"camadas": 5, "ciclos": 0.5, "min_nos": 3, "max_nos": 5},
-    "Hacker": {"camadas": 7, "ciclos": 0.8, "min_nos": 4, "max_nos": 6}
+    "Hacker": {"camadas": 7, "ciclos": 0.8, "min_nos": 6, "max_nos": 8}
 }
 
 ESTADO_MENU = 0
@@ -164,6 +164,14 @@ class GraphGame:
         altura_nivel = (ALTURA - margem_y - 80) // num_camadas
 
         id_counter = 0
+        
+        def validar_posicao(x, y, nodes_existentes, raio_min=55):
+            for node in nodes_existentes:
+                dist = math.hypot(x - node.x, y - node.y)
+                if dist < raio_min:
+                    return False
+            return True
+
         root = Node(id_counter, LARGURA // 2, margem_y)
         self.nodes[id_counter] = root
         camada_anterior = [root] 
@@ -176,11 +184,29 @@ class GraphGame:
             camada_atual = []
             
             for j in range(qtd_nos):
-                jitter = random.randint(-25, 25) 
-                x_pos = margem_x + (j * largura_setor) + (largura_setor // 2) + jitter
-                y_pos = y_base + random.randint(-15, 15)
+                centro_setor = margem_x + (j * largura_setor) + (largura_setor // 2)
                 
-                novo_no = Node(id_counter, x_pos, y_pos)
+                pos_x, pos_y = centro_setor, y_base
+                posicao_valida = False
+                
+                tentativas = 0
+                while not posicao_valida and tentativas < 15:
+                    jitter_x = random.randint(-40, 40) 
+                    jitter_y = random.randint(-25, 25)
+                    
+                    teste_x = centro_setor + jitter_x
+                    teste_y = y_base + jitter_y
+                    
+                    teste_x = max(40, min(LARGURA - 40, teste_x))
+                    teste_y = max(40, min(ALTURA - 40, teste_y))
+
+                    if validar_posicao(teste_x, teste_y, self.nodes.values()):
+                        pos_x, pos_y = teste_x, teste_y
+                        posicao_valida = True
+                    
+                    tentativas += 1
+
+                novo_no = Node(id_counter, pos_x, pos_y)
                 self.nodes[id_counter] = novo_no
                 camada_atual.append(novo_no)
                 id_counter += 1
@@ -195,7 +221,9 @@ class GraphGame:
                 if random.random() < chance_ciclo and id_counter > 5:
                     alvo_id = random.randint(0, id_counter - 2)
                     if alvo_id != no.id:
-                        self.add_edge(no.id, alvo_id)
+                        dist_alvo = math.hypot(self.nodes[alvo_id].x - no.x, self.nodes[alvo_id].y - no.y)
+                        if dist_alvo < 300: 
+                            self.add_edge(no.id, alvo_id)
 
             camada_anterior = camada_atual 
 
