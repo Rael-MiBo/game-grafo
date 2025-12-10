@@ -27,6 +27,8 @@ C_BTN_ACTIVE  = (0, 180, 130)
 LARGURA, ALTURA = 1000, 700
 ARQUIVO_RECORDES = "recordes_graph_arcade.json"
 
+
+# [BALANCEAMENTO DE DIFICULDADE]
 DIFICULDADES = {
     "Noob":   {"camadas": 2, "ciclos": 0.0, "min_nos": 1, "max_nos": 2},
     "Fácil":  {"camadas": 3, "ciclos": 0.1, "min_nos": 2, "max_nos": 3},
@@ -53,6 +55,8 @@ fonte_ui = get_font(18)
 fonte_bold = get_font(22, bold=True)
 fonte_titulo = get_font(50, bold=True)
 fonte_mini = get_font(14)
+
+# [BLOCO DA CLASSE NODE (se já foi visitado, se o mouse está em cima, etc).]
 
 class Node:
     def __init__(self, id, x, y):
@@ -88,6 +92,8 @@ class Node:
         text_color = C_BG_DARK if self.visitado else C_TEXT_WHITE
         txt = fonte_bold.render(str(self.id), True, text_color)
         tela.blit(txt, (self.x - txt.get_width()//2, self.y - txt.get_height()//2))
+
+# [BLOCO DA CLASSE PRINCIPAL (gerencia toda a lógica do jogo)]
 
 class GraphGame:
     def __init__(self):
@@ -135,6 +141,7 @@ class GraphGame:
         with open(ARQUIVO_RECORDES, 'w') as f:
             json.dump(self.recordes, f)
 
+    # Adiciona arestas bidirecionais entre nós e prepara o início de um nível.
     def add_edge(self, u, v):
         if self.nodes[v] not in self.nodes[u].vizinhos:
             self.nodes[u].vizinhos.append(self.nodes[v])
@@ -231,6 +238,7 @@ class GraphGame:
         self.no_atual.visitado = True
         self.recalcular_gabarito()
 
+    # [BLOCO DO ALGORITMO RESOLVEDOR (Solver) define a ordem correta em que os nós devem ser clicados.]
     def recalcular_gabarito(self):
         self.gabarito = []
         start_node = self.nodes[0]
@@ -259,7 +267,8 @@ class GraphGame:
                     for vizinho in vizinhos_ordenados:
                         if vizinho.id not in visitados:
                             pilha.append(vizinho)
-
+                            
+    # [BLOCO DE INPUT DO JOGADOR (mouse e teclado)]
     def processar_clique(self, pos_mouse):
         if self.estado == ESTADO_MENU:
             if self.botao_bfs.collidepoint(pos_mouse):
@@ -327,6 +336,7 @@ class GraphGame:
         for node in self.nodes.values():
             dist = math.hypot(pos_mouse[0] - node.x, pos_mouse[1] - node.y)
             node.hover = (dist < 25)
+
 
     def desenhar_background(self, tela):
         tamanho_grid = 40
@@ -508,6 +518,7 @@ class GraphGame:
             self.desenhar_ranking(tela, pos_mouse)
         elif self.estado == ESTADO_DERROTA:
             self.desenhar_derrota(tela)
+
 
 game = GraphGame()
 clock = pygame.time.Clock()
