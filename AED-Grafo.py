@@ -1,46 +1,59 @@
 import pygame
 import math
 import random 
+import json
+import os
 from collections import deque
 
-# --- CONFIGURAÇÕES VISUAIS ---
-LARGURA, ALTURA = 800, 600
-COR_FUNDO = (30, 30, 30)
-COR_NO = (200, 200, 200)
-COR_ARESTA = (100, 100, 100)
-COR_VISITADO = (50, 200, 50)     
-COR_FILA = (200, 200, 50)        
-COR_ATUAL = (200, 50, 50)        
-COR_TEXTO = (255, 255, 255)
-COR_BARRA_FUNDO = (50, 0, 0)
-COR_BARRA_VIDA = (200, 0, 0)
-COR_BOTAO = (70, 70, 100)
-COR_BOTAO_ATIVO = (0, 150, 0) # Verde para o modo selecionado
-COR_BOTAO_HOVER = (100, 100, 150)
+C_BG_DARK     = (20, 23, 30) 
+C_BG_GRID     = (35, 40, 50)
+C_NODE_OFF    = (60, 70, 80)
+C_NODE_BORDER = (100, 110, 130)
+C_EDGE        = (50, 60, 70)
 
-# --- DIFICULDADES ---
+C_VISITADO    = (0, 200, 150)
+C_FILA        = (255, 180, 0)
+C_ATUAL       = (255, 50, 100)
+C_ERROR       = (200, 50, 50)
+C_GOLD        = (218, 165, 32)
+
+C_TEXT_WHITE  = (240, 240, 245)
+C_TEXT_GREY   = (150, 160, 170)
+C_UI_PANEL    = (30, 35, 45, 200)
+C_BTN_NORMAL  = (50, 60, 80)
+C_BTN_HOVER   = (70, 80, 100)
+C_BTN_ACTIVE  = (0, 180, 130)
+
+LARGURA, ALTURA = 1000, 700
+ARQUIVO_RECORDES = "recordes_graph_arcade.json"
+
 DIFICULDADES = {
     "Noob":   {"camadas": 2, "ciclos": 0.0, "min_nos": 1, "max_nos": 2},
     "Fácil":  {"camadas": 3, "ciclos": 0.1, "min_nos": 2, "max_nos": 3},
     "Normal": {"camadas": 4, "ciclos": 0.3, "min_nos": 2, "max_nos": 4},
     "Pro":    {"camadas": 5, "ciclos": 0.5, "min_nos": 3, "max_nos": 5},
-    "Professor": {"camadas": 10, "ciclos": 0.8, "min_nos": 8, "max_nos": 15}
+    "Hacker": {"camadas": 7, "ciclos": 0.8, "min_nos": 4, "max_nos": 6}
 }
 
-# Estados do Jogo
 ESTADO_MENU = 0
 ESTADO_JOGANDO = 1
-ESTADO_VITORIA = 2
-ESTADO_DERROTA = 3
+ESTADO_INPUT_NOME = 2
+ESTADO_RANKING = 3
+ESTADO_DERROTA = 4
 
 pygame.init()
 tela = pygame.display.set_mode((LARGURA, ALTURA))
-pygame.display.set_caption("AED Game: BFS & DFS")
-fonte = pygame.font.SysFont('Arial', 20)
-fonte_grande = pygame.font.SysFont('Arial', 40, bold=True)
-fonte_pequena = pygame.font.SysFont('Arial', 16)
+pygame.display.set_caption("Neural Graph: Arcade Edition")
 
-# --- CLASSE NODE ---
+def get_font(size, bold=False):
+    fonts = ['Segoe UI', 'Roboto', 'Helvetica', 'Arial']
+    return pygame.font.SysFont(fonts, size, bold=bold)
+
+fonte_ui = get_font(18)
+fonte_bold = get_font(22, bold=True)
+fonte_titulo = get_font(50, bold=True)
+fonte_mini = get_font(14)
+
 class Node:
     def __init__(self, id, x, y):
         self.id = id
@@ -49,25 +62,39 @@ class Node:
         self.vizinhos = []
         self.visitado = False
         self.na_fila = False 
+        self.hover = False
 
-    def desenhar(self, tela):
-        cor = COR_NO
-        if self.visitado: cor = COR_VISITADO
-        elif self.na_fila: cor = COR_FILA
+    def desenhar(self, tela, surface_glow):
+        fill_color = C_NODE_OFF
+        border_color = C_NODE_BORDER
+        radius = 18
         
-        pygame.draw.circle(tela, cor, (self.x, self.y), 18)
-        pygame.draw.circle(tela, (0,0,0), (self.x, self.y), 18, 2)
-        
-        texto = fonte.render(str(self.id), True, (0,0,0))
-        tela.blit(texto, (self.x - 5, self.y - 10))
+        if self.visitado:
+            fill_color = C_VISITADO
+            border_color = (200, 255, 230)
+            pygame.draw.circle(surface_glow, (*C_VISITADO, 50), (self.x, self.y), 30)
+        elif self.na_fila:
+            fill_color = C_NODE_OFF
+            border_color = C_FILA
+            pygame.draw.circle(surface_glow, (*C_FILA, 30), (self.x, self.y), 25)
 
-# --- CLASSE GRAPHGAME ---
+        if self.hover and not self.visitado:
+            border_color = (255, 255, 255)
+            radius = 20
+
+        pygame.draw.circle(tela, fill_color, (self.x, self.y), radius)
+        pygame.draw.circle(tela, border_color, (self.x, self.y), radius, 2)
+        
+        text_color = C_BG_DARK if self.visitado else C_TEXT_WHITE
+        txt = fonte_bold.render(str(self.id), True, text_color)
+        tela.blit(txt, (self.x - txt.get_width()//2, self.y - txt.get_height()//2))
+
 class GraphGame:
     def __init__(self):
         self.nodes = {}
         self.edges = []
         self.no_atual = None
-        self.modo = "BFS" # Padrão inicial
+        self.modo = "BFS"
         self.fila_esperada = deque() 
         self.gabarito = []
         
@@ -76,10 +103,37 @@ class GraphGame:
         self.energia_atual = 100
         self.dificuldade_atual = "Normal"
         
-        # Áreas clicáveis do menu
-        self.botoes_menu_dificuldade = []
-        self.botao_bfs = pygame.Rect(LARGURA//2 - 120, 100, 100, 40)
-        self.botao_dfs = pygame.Rect(LARGURA//2 + 20, 100, 100, 40)
+        self.start_ticks = 0
+        self.tempo_final = 0.0
+        self.pontuacao_final = 0
+        self.nome_jogador = ""
+        self.recordes = self.carregar_recordes()
+
+        self.botoes_menu = []
+        self.botao_bfs = pygame.Rect(0,0,0,0)
+        self.botao_dfs = pygame.Rect(0,0,0,0)
+        self.botao_voltar_menu = pygame.Rect(0,0,0,0)
+
+    def carregar_recordes(self):
+        if not os.path.exists(ARQUIVO_RECORDES):
+            return {}
+        try:
+            with open(ARQUIVO_RECORDES, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+
+    def salvar_recorde(self):
+        chave = f"{self.modo}_{self.dificuldade_atual}"
+        if chave not in self.recordes:
+            self.recordes[chave] = []
+        
+        self.recordes[chave].append([self.nome_jogador, self.pontuacao_final, self.tempo_final])
+        self.recordes[chave].sort(key=lambda x: x[1], reverse=True)
+        self.recordes[chave] = self.recordes[chave][:5]
+        
+        with open(ARQUIVO_RECORDES, 'w') as f:
+            json.dump(self.recordes, f)
 
     def add_edge(self, u, v):
         if self.nodes[v] not in self.nodes[u].vizinhos:
@@ -92,6 +146,7 @@ class GraphGame:
         config = DIFICULDADES[nome_dificuldade]
         self.gerar_fase(config)
         self.estado = ESTADO_JOGANDO
+        self.start_ticks = pygame.time.get_ticks()
 
     def gerar_fase(self, config):
         self.nodes = {}
@@ -104,9 +159,9 @@ class GraphGame:
         min_nos = config["min_nos"]
         max_nos = config["max_nos"]
 
-        margem_x = 50
-        margem_y = 100
-        altura_nivel = (ALTURA - margem_y - 50) // num_camadas
+        margem_x = 80
+        margem_y = 120
+        altura_nivel = (ALTURA - margem_y - 80) // num_camadas
 
         id_counter = 0
         root = Node(id_counter, LARGURA // 2, margem_y)
@@ -121,7 +176,7 @@ class GraphGame:
             camada_atual = []
             
             for j in range(qtd_nos):
-                jitter = random.randint(-20, 20) 
+                jitter = random.randint(-25, 25) 
                 x_pos = margem_x + (j * largura_setor) + (largura_setor // 2) + jitter
                 y_pos = y_base + random.randint(-15, 15)
                 
@@ -133,8 +188,6 @@ class GraphGame:
                 pai = random.choice(camada_anterior)
                 self.add_edge(pai.id, novo_no.id)
 
-            # Ciclos: Mais frequentes no BFS para mostrar rotas alternativas
-            # Menos frequentes no DFS para evitar confusão extrema no início
             chance_ciclo = densidade_ciclos
             if self.modo == "DFS": chance_ciclo *= 0.5 
 
@@ -174,28 +227,26 @@ class GraphGame:
                 if atual.id not in visitados:
                     visitados.add(atual.id)
                     if atual.id != 0: self.gabarito.append(atual.id)
-                    
-                    # No DFS iterativo, invertemos a ordem ao colocar na pilha
-                    # para que ao fazer pop(), saia o menor ID primeiro
                     vizinhos_ordenados = sorted(atual.vizinhos, key=lambda n: n.id, reverse=True)
                     for vizinho in vizinhos_ordenados:
                         if vizinho.id not in visitados:
                             pilha.append(vizinho)
-        
-        print(f"Modo: {self.modo} | Gabarito: {self.gabarito}")
 
     def processar_clique(self, pos_mouse):
         if self.estado == ESTADO_MENU:
-            # 1. Verifica clique nos botões de Modo (BFS/DFS)
             if self.botao_bfs.collidepoint(pos_mouse):
                 self.modo = "BFS"
             elif self.botao_dfs.collidepoint(pos_mouse):
                 self.modo = "DFS"
             
-            # 2. Verifica clique nos botões de Dificuldade
-            for nome, rect in self.botoes_menu_dificuldade:
+            for nome, rect in self.botoes_menu:
                 if rect.collidepoint(pos_mouse):
                     self.iniciar_nivel(nome)
+            return
+        
+        if self.estado == ESTADO_RANKING:
+            if self.botao_voltar_menu.collidepoint(pos_mouse):
+                self.estado = ESTADO_MENU
             return
 
         if self.estado != ESTADO_JOGANDO:
@@ -203,7 +254,7 @@ class GraphGame:
 
         for id, node in self.nodes.items():
             dist = math.hypot(pos_mouse[0] - node.x, pos_mouse[1] - node.y)
-            if dist < 20: 
+            if dist < 30:
                 self.validar_movimento(node)
                 break
 
@@ -217,105 +268,226 @@ class GraphGame:
             node_clicado.visitado = True
             self.no_atual = node_clicado
             self.gabarito.pop(0)
+            
             if not self.gabarito:
-                self.estado = ESTADO_VITORIA
+                self.tempo_final = (pygame.time.get_ticks() - self.start_ticks) / 1000
+                bonus_energia = int(self.energia_atual * 100)
+                bonus_tempo = int(max(0, 5000 - (self.tempo_final * 10)))
+                self.pontuacao_final = bonus_energia + bonus_tempo
+                self.nome_jogador = "" 
+                self.estado = ESTADO_INPUT_NOME
         else:
             self.energia_atual -= 15
             if self.energia_atual <= 0:
                 self.energia_atual = 0
                 self.estado = ESTADO_DERROTA
 
-    def desenhar_menu(self, tela):
-        # --- SEÇÃO 1: ESCOLHA O ALGORITMO ---
-        titulo_algo = fonte.render("1. ESCOLHA O ALGORITMO:", True, COR_TEXTO)
-        tela.blit(titulo_algo, (LARGURA//2 - titulo_algo.get_width()//2, 60))
+    def processar_input_nome(self, evento):
+        if evento.key == pygame.K_RETURN:
+            if self.nome_jogador.strip() == "":
+                self.nome_jogador = "Anonimo"
+            self.salvar_recorde()
+            self.estado = ESTADO_RANKING
+        elif evento.key == pygame.K_BACKSPACE:
+            self.nome_jogador = self.nome_jogador[:-1]
+        else:
+            if len(self.nome_jogador) < 12:
+                self.nome_jogador += evento.unicode
 
-        # Botão BFS
-        cor_bfs = COR_BOTAO_ATIVO if self.modo == "BFS" else COR_BOTAO
-        pygame.draw.rect(tela, cor_bfs, self.botao_bfs, border_radius=8)
-        txt_bfs = fonte.render("BFS", True, COR_TEXTO)
-        tela.blit(txt_bfs, (self.botao_bfs.centerx - txt_bfs.get_width()//2, self.botao_bfs.centery - txt_bfs.get_height()//2))
+    def update_hover(self, pos_mouse):
+        if self.estado != ESTADO_JOGANDO: return
+        for node in self.nodes.values():
+            dist = math.hypot(pos_mouse[0] - node.x, pos_mouse[1] - node.y)
+            node.hover = (dist < 25)
+
+    def desenhar_background(self, tela):
+        tamanho_grid = 40
+        for x in range(0, LARGURA, tamanho_grid):
+            pygame.draw.line(tela, C_BG_GRID, (x, 0), (x, ALTURA), 1)
+        for y in range(0, ALTURA, tamanho_grid):
+            pygame.draw.line(tela, C_BG_GRID, (0, y), (LARGURA, y), 1)
+
+    def draw_button(self, tela, rect, text, active=False, hover=False, custom_color=None):
+        cor_base = custom_color if custom_color else C_BTN_NORMAL
+        cor_fundo = C_BTN_ACTIVE if active else (C_BTN_HOVER if hover else cor_base)
+        cor_borda = (255, 255, 255) if hover else C_NODE_BORDER
         
-        # Botão DFS
-        cor_dfs = COR_BOTAO_ATIVO if self.modo == "DFS" else COR_BOTAO
-        pygame.draw.rect(tela, cor_dfs, self.botao_dfs, border_radius=8)
-        txt_dfs = fonte.render("DFS", True, COR_TEXTO)
-        tela.blit(txt_dfs, (self.botao_dfs.centerx - txt_dfs.get_width()//2, self.botao_dfs.centery - txt_dfs.get_height()//2))
+        pygame.draw.rect(tela, cor_fundo, rect, border_radius=12)
+        pygame.draw.rect(tela, cor_borda, rect, 2, border_radius=12)
+        txt_surf = fonte_bold.render(text, True, C_TEXT_WHITE)
+        tela.blit(txt_surf, (rect.centerx - txt_surf.get_width()//2, rect.centery - txt_surf.get_height()//2))
 
-        # Descrição do modo
-        desc = "Regra: Visite todos os vizinhos (camada) antes de descer." if self.modo == "BFS" else "Regra: Vá o mais fundo possível antes de voltar."
-        txt_desc = fonte_pequena.render(desc, True, (200, 200, 200))
-        tela.blit(txt_desc, (LARGURA//2 - txt_desc.get_width()//2, 150))
-
-        # --- SEÇÃO 2: ESCOLHA A DIFICULDADE ---
-        titulo_dif = fonte.render("2. ESCOLHA A DIFICULDADE PARA INICIAR:", True, COR_TEXTO)
-        tela.blit(titulo_dif, (LARGURA//2 - titulo_dif.get_width()//2, 200))
+    def desenhar_menu(self, tela, pos_mouse):
+        tit = "NEURAL GRAPH"
+        sombra = fonte_titulo.render(tit, True, (0, 0, 0))
+        texto = fonte_titulo.render(tit, True, C_VISITADO)
+        tela.blit(sombra, (LARGURA//2 - texto.get_width()//2 + 4, 54))
+        tela.blit(texto, (LARGURA//2 - texto.get_width()//2, 50))
         
-        self.botoes_menu_dificuldade = []
-        y_start = 240
+        sub = fonte_ui.render("Arcade Edition: Score & Speed", True, C_TEXT_GREY)
+        tela.blit(sub, (LARGURA//2 - sub.get_width()//2, 100))
+
+        lbl_mode = fonte_bold.render("SELECIONE O PROTOCOLO:", True, C_TEXT_WHITE)
+        tela.blit(lbl_mode, (LARGURA//2 - lbl_mode.get_width()//2, 160))
+
+        bw, bh = 240, 50
+        gap = 20
+        start_x = LARGURA//2 - bw - gap//2
+        self.botao_bfs = pygame.Rect(start_x, 200, bw, bh)
+        self.botao_dfs = pygame.Rect(start_x + bw + gap, 200, bw, bh)
+
+        self.draw_button(tela, self.botao_bfs, "BFS (Largura)", active=(self.modo=="BFS"), hover=self.botao_bfs.collidepoint(pos_mouse))
+        self.draw_button(tela, self.botao_dfs, "DFS (Profund.)", active=(self.modo=="DFS"), hover=self.botao_dfs.collidepoint(pos_mouse))
+
+        desc_txt = "Onda expandindo em camadas." if self.modo == "BFS" else "Caminho único até o fim."
+        desc = fonte_mini.render(desc_txt, True, C_FILA)
+        tela.blit(desc, (LARGURA//2 - desc.get_width()//2, 260))
+
+        lbl_dif = fonte_bold.render("DENSIDADE DA REDE:", True, C_TEXT_WHITE)
+        tela.blit(lbl_dif, (LARGURA//2 - lbl_dif.get_width()//2, 320))
+
+        self.botoes_menu = []
+        y_start = 360
         for i, nome in enumerate(DIFICULDADES.keys()):
-            rect = pygame.Rect(LARGURA//2 - 100, y_start + (i * 60), 200, 45)
-            self.botoes_menu_dificuldade.append((nome, rect))
-            
-            mouse_pos = pygame.mouse.get_pos()
-            cor = COR_BOTAO_HOVER if rect.collidepoint(mouse_pos) else COR_BOTAO
-            
-            pygame.draw.rect(tela, cor, rect, border_radius=10)
-            pygame.draw.rect(tela, (255,255,255), rect, 2, border_radius=10)
-            
-            texto = fonte.render(nome, True, COR_TEXTO)
-            tela.blit(texto, (rect.centerx - texto.get_width()//2, rect.centery - texto.get_height()//2))
+            rect = pygame.Rect(LARGURA//2 - 120, y_start + (i * 60), 240, 45)
+            self.botoes_menu.append((nome, rect))
+            self.draw_button(tela, rect, nome, hover=rect.collidepoint(pos_mouse))
 
     def desenhar_hud(self, tela):
-        pygame.draw.rect(tela, COR_BARRA_FUNDO, (200, 10, 400, 30))
-        largura_vida = 400 * (self.energia_atual / self.energia_max)
-        pygame.draw.rect(tela, COR_BARRA_VIDA, (200, 10, largura_vida, 30))
-        pygame.draw.rect(tela, (255,255,255), (200, 10, 400, 30), 2)
-        
-        texto = fonte.render(f"Energia: {int(self.energia_atual)}%", True, COR_TEXTO)
-        tela.blit(texto, (350, 15))
-        
-        # Mostra qual algoritmo estamos jogando
-        info = f"Modo: {self.modo} ({self.dificuldade_atual}) | Faltam: {len(self.gabarito)}"
-        tela.blit(fonte.render(info, True, COR_TEXTO), (10, 50))
+        panel = pygame.Surface((LARGURA, 80), pygame.SRCALPHA)
+        panel.fill(C_UI_PANEL)
+        pygame.draw.line(panel, C_NODE_BORDER, (0, 79), (LARGURA, 79), 1)
+        tela.blit(panel, (0,0))
 
-    def desenhar_fim(self, tela, texto_prin, cor_prin, texto_sec):
+        lbl_modo = fonte_bold.render(f"MODO: {self.modo}", True, C_VISITADO)
+        lbl_dif = fonte_ui.render(f"Nível: {self.dificuldade_atual}", True, C_TEXT_GREY)
+        tela.blit(lbl_modo, (30, 15))
+        tela.blit(lbl_dif, (30, 45))
+
+        bar_w, bar_h = 300, 20
+        bar_x, bar_y = LARGURA//2 - bar_w//2, 20
+        pygame.draw.rect(tela, (20, 20, 20), (bar_x, bar_y, bar_w, bar_h), border_radius=10)
+        pct = self.energia_atual / self.energia_max
+        cor_vida = C_VISITADO if pct > 0.5 else (C_FILA if pct > 0.2 else C_ERROR)
+        pygame.draw.rect(tela, cor_vida, (bar_x, bar_y, bar_w * pct, bar_h), border_radius=10)
+        pygame.draw.rect(tela, C_TEXT_GREY, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=10)
+
+        tempo_atual = (pygame.time.get_ticks() - self.start_ticks) / 1000
+        lbl_time = fonte_bold.render(f"{tempo_atual:.1f}s", True, C_FILA)
+        tela.blit(lbl_time, (LARGURA//2 - lbl_time.get_width()//2, 50))
+
+        lbl_faltam = fonte_bold.render(f"RESTANTES: {len(self.gabarito)}", True, C_TEXT_WHITE)
+        tela.blit(lbl_faltam, (LARGURA - 30 - lbl_faltam.get_width(), 30))
+
+    def desenhar_input_nome(self, tela):
         overlay = pygame.Surface((LARGURA, ALTURA))
-        overlay.set_alpha(220)
-        overlay.fill((0, 0, 0))
+        overlay.set_alpha(240)
+        overlay.fill((10, 12, 18))
         tela.blit(overlay, (0,0))
         
-        t1 = fonte_grande.render(texto_prin, True, cor_prin)
-        t2 = fonte.render(texto_sec, True, (255, 255, 255))
-        t3 = fonte.render("Pressione 'M' para voltar ao Menu", True, (200, 200, 200))
+        t1 = fonte_titulo.render("NÍVEL CONCLUÍDO!", True, C_VISITADO)
+        t_score = fonte_titulo.render(f"{self.pontuacao_final} Pts", True, C_FILA)
+        t_tempo = fonte_ui.render(f"Tempo: {self.tempo_final:.2f}s | Vida: {int(self.energia_atual)}%", True, C_TEXT_GREY)
+        t_inst = fonte_bold.render("Digite seu nome e pressione ENTER:", True, C_TEXT_WHITE)
         
+        cx = LARGURA//2
+        tela.blit(t1, (cx - t1.get_width()//2, 150))
+        tela.blit(t_score, (cx - t_score.get_width()//2, 220))
+        tela.blit(t_tempo, (cx - t_tempo.get_width()//2, 280))
+        tela.blit(t_inst, (cx - t_inst.get_width()//2, 340))
+        
+        input_rect = pygame.Rect(cx - 150, 380, 300, 50)
+        pygame.draw.rect(tela, C_BG_GRID, input_rect, border_radius=8)
+        pygame.draw.rect(tela, C_VISITADO, input_rect, 2, border_radius=8)
+        
+        nome_s = fonte_bold.render(self.nome_jogador, True, C_TEXT_WHITE)
+        tela.blit(nome_s, (input_rect.centerx - nome_s.get_width()//2, input_rect.centery - nome_s.get_height()//2))
+
+    def desenhar_ranking(self, tela, pos_mouse):
+        overlay = pygame.Surface((LARGURA, ALTURA))
+        overlay.set_alpha(250)
+        overlay.fill((10, 12, 18))
+        tela.blit(overlay, (0,0))
+
+        chave = f"{self.modo}_{self.dificuldade_atual}"
+        top_scores = self.recordes.get(chave, [])
+
+        t1 = fonte_titulo.render(f"RANKING: {self.modo} - {self.dificuldade_atual}", True, C_FILA)
+        tela.blit(t1, (LARGURA//2 - t1.get_width()//2, 50))
+        
+        header = fonte_ui.render("RANK   JOGADOR           PONTOS       TEMPO", True, C_TEXT_GREY)
+        tela.blit(header, (LARGURA//2 - 200, 140))
+
+        start_y = 180
+        for i, (nome, pontos, tempo) in enumerate(top_scores):
+            cor = C_VISITADO if i == 0 else C_TEXT_WHITE
+            str_rank = f"{i+1}."
+            str_nome = f"{nome[:10]:<10}"
+            str_pts  = f"{pontos:^10}"
+            str_tmp  = f"{tempo:.1f}s"
+            
+            t_rank = fonte_bold.render(str_rank, True, cor)
+            t_nome = fonte_bold.render(str_nome, True, cor)
+            t_pts  = fonte_bold.render(str_pts, True, C_FILA)
+            t_tmp  = fonte_bold.render(str_tmp, True, cor)
+            
+            y_pos = start_y + i*60
+            tela.blit(t_rank, (LARGURA//2 - 200, y_pos))
+            tela.blit(t_nome, (LARGURA//2 - 150, y_pos))
+            tela.blit(t_pts,  (LARGURA//2 + 20, y_pos))
+            tela.blit(t_tmp,  (LARGURA//2 + 180, y_pos))
+            pygame.draw.line(tela, C_BG_GRID, (LARGURA//2 - 220, y_pos + 40), (LARGURA//2 + 250, y_pos + 40), 1)
+
+        self.botao_voltar_menu = pygame.Rect(LARGURA//2 - 100, ALTURA - 80, 200, 40)
+        self.draw_button(tela, self.botao_voltar_menu, "VOLTAR AO MENU", hover=self.botao_voltar_menu.collidepoint(pos_mouse))
+
+    def desenhar_derrota(self, tela):
+        overlay = pygame.Surface((LARGURA, ALTURA))
+        overlay.set_alpha(200)
+        overlay.fill((20, 10, 10))
+        tela.blit(overlay, (0,0))
+        t1 = fonte_titulo.render("FALHA CRÍTICA", True, C_ERROR)
+        t2 = fonte_bold.render("Pressione [M] para o Menu", True, C_TEXT_WHITE)
         tela.blit(t1, (LARGURA//2 - t1.get_width()//2, ALTURA//2 - 50))
         tela.blit(t2, (LARGURA//2 - t2.get_width()//2, ALTURA//2 + 20))
-        tela.blit(t3, (LARGURA//2 - t3.get_width()//2, ALTURA//2 + 60))
 
     def draw(self, tela):
+        self.desenhar_background(tela)
+        pos_mouse = pygame.mouse.get_pos()
+
         if self.estado == ESTADO_MENU:
-            self.desenhar_menu(tela)
+            self.desenhar_menu(tela, pos_mouse)
             return
 
-        for u, v in self.edges:
-            pygame.draw.line(tela, COR_ARESTA, (u.x, u.y), (v.x, v.y), 2)
-        for node in self.nodes.values():
-            node.desenhar(tela)
-        
-        self.desenhar_hud(tela)
+        if self.estado in [ESTADO_JOGANDO, ESTADO_INPUT_NOME, ESTADO_DERROTA]:
+            surface_glow = pygame.Surface((LARGURA, ALTURA), pygame.SRCALPHA)
+            for u, v in self.edges:
+                cor = C_VISITADO if (u.visitado and v.visitado) else C_EDGE
+                largura = 2 if (u.visitado and v.visitado) else 1
+                pygame.draw.line(tela, cor, (u.x, u.y), (v.x, v.y), largura)
+            for node in self.nodes.values():
+                node.desenhar(tela, surface_glow)
+            tela.blit(surface_glow, (0,0))
+            if self.no_atual:
+                pygame.draw.circle(tela, C_ATUAL, (self.no_atual.x, self.no_atual.y), 6)
+            
+            if self.estado == ESTADO_JOGANDO:
+                self.desenhar_hud(tela)
 
-        if self.estado == ESTADO_VITORIA:
-            self.desenhar_fim(tela, "VITÓRIA!", (50, 255, 50), "Algoritmo executado com sucesso!")
+        if self.estado == ESTADO_INPUT_NOME:
+            self.desenhar_input_nome(tela)
+        elif self.estado == ESTADO_RANKING:
+            self.desenhar_ranking(tela, pos_mouse)
         elif self.estado == ESTADO_DERROTA:
-            self.desenhar_fim(tela, "GAME OVER", (255, 50, 50), "Você quebrou a lógica do algoritmo.")
+            self.desenhar_derrota(tela)
 
-# --- EXECUÇÃO ---
 game = GraphGame()
+clock = pygame.time.Clock()
 
 rodando = True
 while rodando:
-    tela.fill(COR_FUNDO)
+    tela.fill(C_BG_DARK)
+    game.update_hover(pygame.mouse.get_pos())
     
     for evento in pygame.event.get():
         if evento.type == pygame.QUIT:
@@ -326,10 +498,14 @@ while rodando:
                 game.processar_clique(pygame.mouse.get_pos())
         
         if evento.type == pygame.KEYDOWN:
-            if evento.key == pygame.K_m and game.estado != ESTADO_JOGANDO:
-                game.estado = ESTADO_MENU
+            if game.estado == ESTADO_INPUT_NOME:
+                game.processar_input_nome(evento)
+            elif evento.key == pygame.K_m:
+                 if game.estado in [ESTADO_RANKING, ESTADO_DERROTA]:
+                     game.estado = ESTADO_MENU
 
     game.draw(tela)
     pygame.display.flip()
+    clock.tick(60)
 
 pygame.quit()
